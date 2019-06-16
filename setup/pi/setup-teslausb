@@ -197,20 +197,21 @@ function create_usb_drive_backing_files () {
 }
 
 function configure_hostname () {
-  # Headless image already has hostname set
-  if [ ! $HEADLESS_SETUP = "true" ]
+  local old_host_name=$(hostname)
+  local new_host_name="$TESLAUSB_HOSTNAME"
+  # Set the specified hostname if it differs from the current name
+  if [ "$new_host_name" != "$old_host_name" ]
   then
     setup_progress "Configuring the hostname..."
-
-    local new_host_name="$TESLAUSB_HOSTNAME"
-    cp /etc/hosts ~
-    sed "s/raspberrypi/$new_host_name/g" ~/hosts > /etc/hosts
-    rm ~/hosts
-
-    cp /etc/hostname ~
-    sed "s/raspberrypi/$new_host_name/g" ~/hostname > /etc/hostname
-    setup_progress "Configured the hostname."
-    rm ~/hostname
+    sed -i -e "s/$old_host_name/$new_host_name/g" /etc/hosts
+    sed -i -e "s/$old_host_name/$new_host_name/g" /etc/hostname
+    while ! hostnamectl set-hostname $new_host_name
+    do
+      setup_progress "hostnamectl failed, retrying"
+      sleep 1
+    done
+    systemctl restart avahi-daemon
+    setup_progress "Configured hostname: $(hostname)"
   fi
 }
 
@@ -420,6 +421,8 @@ then
   fi
 fi
 
+configure_hostname
+
 update_package_index
 
 # If USE_LED_FOR_SETUP_PROGRESS = true.
@@ -455,8 +458,6 @@ headless_setup_progress_flash 3
 
 create_usb_drive_backing_files
 
-configure_hostname
-
 # Flash for stage 5 headless (Mark success, FS readonly)
 headless_setup_progress_flash 4
 
@@ -473,9 +474,9 @@ fi
 if [ "$SAMBA_ENABLED" = "true" ]
 then
   export SAMBA_GUEST
-  get_script /tmp/ configure-samba.sh setup/pi
   get_script /root/bin smb-on.sh run
   get_script /root/bin smb-off.sh run
+  get_script /tmp configure-samba.sh setup/pi
   /tmp/configure-samba.sh
 fi
 
