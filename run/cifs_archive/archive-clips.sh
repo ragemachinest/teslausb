@@ -14,6 +14,25 @@ function keep_car_awake() {
   fi
 }
 
+function connectionmonitor {
+  while true
+  do
+    if timeout 5 /root/bin/archive-is-reachable.sh $ARCHIVE_HOST_NAME
+    then
+      sleep 2
+    elif timeout 5 /root/bin/archive-is-reachable.sh $ARCHIVE_HOST_NAME # try one more time
+    then
+      sleep 2
+    else
+      log "connection dead, killing archive-clips"
+      # The archive loop might be stuck on an unresponsive server, so kill it hard.
+      # (should be no worse than losing power in the middle of an operation)
+      kill -9 $1
+      return
+    fi
+  done
+}
+
 function moveclips() {
   ROOT="$1"
   PATTERN="$2"
@@ -32,7 +51,11 @@ function moveclips() {
     if [ -d "$ROOT/$file_name" ]
     then
       log "Creating output directory '$file_name'"
-      mkdir -p "$ARCHIVE_MOUNT/$file_name"
+      if ! mkdir -p "$ARCHIVE_MOUNT/$file_name"
+      then
+        log "Failed to create '$file_name', check that archive server is writable and has free space"
+        return
+      fi
     elif [ -f "$ROOT/$file_name" ]
     then
       size=$(stat -c%s "$ROOT/$file_name")
@@ -69,11 +92,15 @@ function moveclips() {
   done <<< $(cd "$ROOT"; find $PATTERN)
 }
 
+connectionmonitor $$ &
+
 # legacy file name pattern, firmware 2018.*
 moveclips "$CAM_MOUNT/TeslaCam" 'saved*'
 
 # new file name pattern, firmware 2019.*
 moveclips "$CAM_MOUNT/TeslaCam/SavedClips" '*'
+
+kill %1
 
 # delete empty directories under SavedClips
 rmdir --ignore-fail-on-non-empty "$CAM_MOUNT/TeslaCam/SavedClips"/* || true
@@ -82,7 +109,7 @@ log "Moved $NUM_FILES_MOVED file(s), failed to copy $NUM_FILES_FAILED, deleted $
 
 if [ $NUM_FILES_MOVED -gt 0 ]
 then
-  /root/bin/send-push-message "$NUM_FILES_MOVED"
+  /root/bin/send-push-message "TeslaUSB:" "Moved $NUM_FILES_MOVED dashcam file(s), failed to copy $NUM_FILES_FAILED, deleted $NUM_FILES_DELETED."
 fi
 
 log "Finished moving clips to archive."

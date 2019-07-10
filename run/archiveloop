@@ -47,12 +47,20 @@ then
   exit 1
 fi
 
+function timestamp () {
+  local prefix=${1:-}
+  while IFS= read line
+  do
+    echo "$(date): $prefix$line"
+  done
+}
+
 function fix_errors_in_mount_point () {
   local mount_point="$1"
   log "Running fsck on $mount_point..."
   local backingfile=$(mount | grep -w "$mount_point" | awk '{print $1}')
   local loopback=$(losetup -l | grep -w  "$backingfile" | awk '{print $1}')
-  /sbin/fsck "$loopback" -- -a >> "$LOG_FILE" 2>&1 || echo ""
+  /sbin/fsck "$loopback" -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
   log "Finished fsck on $mount_point."
 }
 
@@ -173,8 +181,18 @@ function ensure_music_file_is_mounted () {
 function unmount_mount_point () {
   local mount_point="$1"
   log "Unmounting $mount_point..."
-  umount "$mount_point" >> "$LOG_FILE" 2>&1
-  log "Unmounted $mount_point."
+  if umount "$mount_point" >> "$LOG_FILE" 2>&1
+  then
+    log "Unmounted $mount_point."
+  else
+    log "Failed to unmount $mount_point, trying lazy unmount."
+    if umount -l "$mount_point" >> "$LOG_FILE" 2>&1
+    then
+      log "lazily unmounted $mount_point"
+    else
+      log "lazy unmount failed"
+    fi
+  fi
 }
 
 function unmount_cam_file () {
@@ -247,6 +265,8 @@ function disconnect_usb_drives_from_host () {
 function archive_teslacam_clips () {
   log "Starting recording archiving..."
 
+  /root/bin/send-push-message "TeslaUSB:" "Archiving started at $(date)"
+
   ensure_cam_file_is_mounted
 
   fix_errors_in_cam_file
@@ -287,7 +307,7 @@ function archive_clips () {
     log "Archiving failed."
   fi
 
-  if [ -d "$MUSIC_ARCHIVE_MOUNT" -a -d "$MUSIC_MOUNT" ]
+  if timeout 5 [ -d "$MUSIC_ARCHIVE_MOUNT" -a -d "$MUSIC_MOUNT" ]
   then
     log "Copying music..."
     if copy_music_files
@@ -297,7 +317,7 @@ function archive_clips () {
       log "Copying music failed."
     fi
   else
-    log "No music archive configured"
+    log "Music archive not configured or unreachable"
   fi
 
   /root/bin/disconnect-archive.sh
@@ -334,17 +354,39 @@ function doubleblink () {
   echo 1 > /sys/class/leds/led0/invert
 }
 
+function set_time () {
+  log "Waiting for time to be set by ntpd"
+  for i in $(seq 1 10)
+  do
+    if ntp-wait --tries=1 --sleep=1
+    then
+      log "Time now set"
+      return
+    fi
+    sleep 2
+  done
+  log "Time still not set, attempting to force it"
+  if ! ntpd -q -x -g
+  then
+    log "Failed to set time"
+  fi
+}
+
+export ARCHIVE_HOST_NAME
 export -f mount_mountpoint
 export -f ensure_mountpoint_is_mounted
 export -f retry
 export -f ensure_mountpoint_is_mounted_with_retry
 export -f log
 
+echo "==============================================" >> "$LOG_FILE"
 log "Starting archiveloop..."
 
 if archive_is_reachable
 then
   fastblink
+
+  set_time
 
   # archive_clips will fix errors in the cam file
   mount_and_fix_errors_in_music_file
@@ -370,6 +412,8 @@ do
 
   fastblink
 
+  set_time
+
   sleep ${ARCHIVE_DELAY:-20}
 
   archive_clips
@@ -379,6 +423,6 @@ do
   doubleblink
 
   wait_for_archive_to_be_unreachable
-    
+
   check_if_usb_gadget_is_mounted
 done

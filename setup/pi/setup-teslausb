@@ -384,8 +384,19 @@ function cmd_diagnose {
       echo "no archiveloop log found"
     fi
 
+    echo -e "====== system log ======"
+    if [ -x /bin/logread ]
+    then
+      /bin/logread
+    else
+      echo "logread not installed"
+    fi
+
     echo -e "====== dmesg ======"
     dmesg
+    echo -e "====== process list and uptime ======"
+    ps -eaf
+    echo "$(hostname) has been $(uptime -p). System time is $(date)"
     echo -e "====== end of diagnostics ======"
   } |
     # clean up the output a bit
