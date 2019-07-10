@@ -49,7 +49,7 @@ fi
 
 function timestamp () {
   local prefix=${1:-}
-  while IFS= read line
+  while read line
   do
     echo "$(date): $prefix$line"
   done
@@ -265,8 +265,6 @@ function disconnect_usb_drives_from_host () {
 function archive_teslacam_clips () {
   log "Starting recording archiving..."
 
-  /root/bin/send-push-message "TeslaUSB:" "Archiving started at $(date)"
-
   ensure_cam_file_is_mounted
 
   fix_errors_in_cam_file
@@ -372,6 +370,68 @@ function set_time () {
   fi
 }
 
+function snapshot {
+  # Only take a snapshot if the remaining free space is greater than
+  # the size of the cam disk image. Delete older snapshots if necessary
+  # to achieve that.
+  # todo: this could be put in a background task and with a lower free
+  # space requirement, to delete old snapshots just before running out
+  # of space and thus make better use of space
+  local imgsize=$(eval $(stat --format='echo $((%b*%B))' /backingfiles/cam_disk.bin))
+  while true
+  do
+    local freespace=$(eval $(stat --file-system --format='echo $((%f*%S))' /backingfiles/cam_disk.bin))
+    if [ $freespace -gt $imgsize ]
+    then
+      break
+    fi
+    if ! stat /backingfiles/snapshots/snap-*.bin > /dev/null 2>&1
+    then
+      log "not enough space for snapshots"
+      return
+    fi
+    oldest=$(ls -lC1 /backingfiles/snapshots/snap-*.bin | head -1)
+    log "low space, deleting $oldest"
+    rm -f "$oldest"
+    rm -f "$oldest.toc"
+  done
+
+  local oldnum=Z
+  local newnum=0
+  if stat /backingfiles/snapshots/snap-*.bin > /dev/null 2>&1
+  then
+    oldnum=$(ls -lC1 /backingfiles/snapshots/snap-*.bin | tail -1 | tr -c -d '[:digit:]' | sed 's/^0*//' )
+    newnum=$((oldnum + 1))
+  fi
+  local oldname=/backingfiles/snapshots/snap-$(printf "%06d" $oldnum).bin
+  local newname=/backingfiles/snapshots/snap-$(printf "%06d" $newnum).bin
+  local tmpname=/backingfiles/snapshots/newsnap.bin
+  log "taking snapshot of cam disk: $newname"
+  rm -f "$tmpname"
+  /root/bin/mount_snapshot.sh /backingfiles/cam_disk.bin "$tmpname" /tmp/snap
+  log "took snapshot"
+
+  # check whether this snapshot is actually different from the previous one
+  ls -lR --time-style=+%s /tmp/snap/TeslaCam > "$newname.toc"
+  /root/bin/release_snapshot.sh /tmp/snap
+  if cmp "$oldname.toc" "$newname.toc"
+  then
+    log "new snapshot is identical to previous one, discarding"
+    rm -f "$tmpname"
+    rm -f "$newname.toc"
+  else
+    mv "$tmpname" "$newname"
+  fi
+}
+
+function snapshotloop {
+  while true
+  do
+    sleep 3500
+    snapshot
+  done
+}
+
 export ARCHIVE_HOST_NAME
 export -f mount_mountpoint
 export -f ensure_mountpoint_is_mounted
@@ -381,6 +441,10 @@ export -f log
 
 echo "==============================================" >> "$LOG_FILE"
 log "Starting archiveloop..."
+
+snapshot
+
+snapshotloop &
 
 if archive_is_reachable
 then
