@@ -21,6 +21,9 @@ then
   fi
 fi
 
+# turning off hdmi saves a little bit of power
+/usr/bin/tvservice -o
+
 export LOG_FILE=/mutable/archiveloop.log
 
 export CAM_MOUNT=/mnt/cam
@@ -370,6 +373,43 @@ function set_time () {
   fi
 }
 
+function mount_all_snapshots {
+  for img in /backingfiles/snapshots/snap-*/snap.bin
+  do
+    imgdir=$(dirname "$img")
+    if mount | grep "$imgdir/mnt"
+    then
+      echo "$img already mounted"
+      return
+    fi
+    /root/bin/mount_image.sh "$img" "$imgdir/mnt"
+  done
+}
+
+function make_links_for_snapshot {
+  local collection=/backingfiles/TeslaCam/RecentClips
+  mkdir -p $collection
+  local curmnt="$1"
+  local finalmnt="$2"
+  log "making links for $curmnt, retargeted to $finalmnt"
+  if stat $curmnt/TeslaCam/RecentClips/* > /dev/null
+  then
+    for f in $curmnt/TeslaCam/RecentClips/*
+    do
+      log "linking $f"
+      ln -sf $(echo $f | sed "s@$curmnt@$finalmnt@") $collection
+    done
+  fi
+  log "made all links for $curmnt"
+}
+
+function gather_snapshots {
+  for mnt in /backingfiles/snapshots/snap-*/mnt
+  do
+    make_links_for_snapshot "$mnt" "$mnt"
+  done
+}
+
 function snapshot {
   # Only take a snapshot if the remaining free space is greater than
   # the size of the cam disk image. Delete older snapshots if necessary
@@ -385,42 +425,45 @@ function snapshot {
     then
       break
     fi
-    if ! stat /backingfiles/snapshots/snap-*.bin > /dev/null 2>&1
+    if ! stat /backingfiles/snapshots/snap-*/snap.bin > /dev/null 2>&1
     then
       log "not enough space for snapshots"
       return
     fi
-    oldest=$(ls -lC1 /backingfiles/snapshots/snap-*.bin | head -1)
+    oldest=$(ls -ldC1 /backingfiles/snapshots/snap-* | head -1)
     log "low space, deleting $oldest"
-    rm -f "$oldest"
-    rm -f "$oldest.toc"
+    /root/bin/release_snapshot.sh "$oldest/mnt"
+    rm -rf "$oldest"
   done
 
   local oldnum=Z
   local newnum=0
-  if stat /backingfiles/snapshots/snap-*.bin > /dev/null 2>&1
+  if stat /backingfiles/snapshots/snap-*/snap.bin > /dev/null 2>&1
   then
-    oldnum=$(ls -lC1 /backingfiles/snapshots/snap-*.bin | tail -1 | tr -c -d '[:digit:]' | sed 's/^0*//' )
+    oldnum=$(ls -lC1 /backingfiles/snapshots/snap-*/snap.bin | tail -1 | tr -c -d '[:digit:]' | sed 's/^0*//' )
     newnum=$((oldnum + 1))
   fi
-  local oldname=/backingfiles/snapshots/snap-$(printf "%06d" $oldnum).bin
-  local newname=/backingfiles/snapshots/snap-$(printf "%06d" $newnum).bin
-  local tmpname=/backingfiles/snapshots/newsnap.bin
+  local oldname=/backingfiles/snapshots/snap-$(printf "%06d" $oldnum)/snap.bin
+  local newsnapdir=/backingfiles/snapshots/snap-$(printf "%06d" $newnum)
+  local newname=$newsnapdir/snap.bin
+  local tmpsnapdir=/backingfiles/snapshots/newsnap
+  local tmpsnapname=$tmpsnapdir/snap.bin
+  local tmpsnapmnt=$tmpsnapdir/mnt
   log "taking snapshot of cam disk: $newname"
-  rm -f "$tmpname"
-  /root/bin/mount_snapshot.sh /backingfiles/cam_disk.bin "$tmpname" /tmp/snap
+  rm -rf "$tmpsnapdir"
+  /root/bin/mount_snapshot.sh /backingfiles/cam_disk.bin "$tmpsnapname" "$tmpsnapmnt"
   log "took snapshot"
 
   # check whether this snapshot is actually different from the previous one
-  ls -lR --time-style=+%s /tmp/snap/TeslaCam > "$newname.toc"
-  /root/bin/release_snapshot.sh /tmp/snap
-  if cmp "$oldname.toc" "$newname.toc"
+  ls -lR --time-style=+%s "$tmpsnapmnt/TeslaCam" > "$tmpsnapname.toc"
+  if cmp "$oldname.toc" "$tmpsnapname.toc"
   then
     log "new snapshot is identical to previous one, discarding"
-    rm -f "$tmpname"
-    rm -f "$newname.toc"
+    /root/bin/release_snapshot.sh "$tmpsnapmnt"
+    rm -rf "$tmpsnapdir"
   else
-    mv "$tmpname" "$newname"
+    make_links_for_snapshot "$tmpsnapmnt" "$newsnapdir/mnt"
+    mv "$tmpsnapdir" "$newsnapdir"
   fi
 }
 
@@ -441,6 +484,9 @@ export -f log
 
 echo "==============================================" >> "$LOG_FILE"
 log "Starting archiveloop..."
+
+mount_all_snapshots
+log "mounted all snapshots"
 
 snapshot
 
