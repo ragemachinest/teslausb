@@ -73,17 +73,18 @@ then
 	   pam password change = yes
 	   map to guest = bad user
 	   usershare allow guests = yes
+           unix extensions = no
+           wide links = yes
 
 	[TeslaCam]
 	   read only = yes
 	   locking = no
-	   path = /mnt/smbexport/%I-%d
+	   path = /backingfiles/TeslaCam
 	   guest ok = $GUEST_OK
 	   create mask = 0775
 	   veto files = /._*/.DS_Store/
 	   delete veto files = yes
-	   root preexec = /root/bin/smb-on.sh "%I-%d"
-	   root postexec = /root/bin/smb-off.sh "%I-%d"
+	   root preexec = /root/bin/make_snapshot.sh
 	EOF
 
   apt-get -y --force-yes install samba
