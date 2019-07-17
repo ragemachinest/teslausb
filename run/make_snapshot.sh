@@ -8,6 +8,7 @@ fi
 
 if [ "${FLOCKED:-}" != "$0" ]
 then
+  mkdir -p /backingfiles/snapshots
   if FLOCKED="$0" flock -E 99 /backingfiles/snapshots "$0" "$@" || case "$?" in
   99) echo "failed to lock snapshots dir"
       exit 99
@@ -64,7 +65,7 @@ function snapshot {
     rm -rf "$oldest" 
   done 
  
-  local oldnum=Z 
+  local oldnum=-1
   local newnum=0 
   if stat /backingfiles/snapshots/snap-*/snap.bin > /dev/null 2>&1 
   then 

@@ -374,6 +374,12 @@ function set_time () {
 }
 
 function mount_all_snapshots {
+  if ! stat /backingfiles/snapshots/snap-*/snap.bin &> /dev/null
+  then
+    log "no snapshots"
+    return
+  fi
+
   for img in /backingfiles/snapshots/snap-*/snap.bin
   do
     imgdir=$(dirname "$img")
