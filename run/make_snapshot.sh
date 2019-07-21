@@ -36,6 +36,15 @@ function make_links_for_snapshot {
       ln -sf $(echo $f | sed "s@$curmnt@$finalmnt@") $collection
     done
   fi
+  # also link in any files that were moved to SavedClips
+  if stat $curmnt/TeslaCam/SavedClips/*/* > /dev/null
+  then
+    for f in $curmnt/TeslaCam/SavedClips/*/*
+    do
+      log "linking $f"
+      ln -sf $(echo $f | sed "s@$curmnt@$finalmnt@") $collection
+    done
+  fi
   log "made all links for $curmnt"
 }
 
