@@ -452,6 +452,10 @@ do
 
   sleep ${ARCHIVE_DELAY:-20}
 
+  # take a snapshot before archive_clips starts
+  # deleting files
+  /root/bin/make_snapshot.sh
+
   archive_clips
 
   truncate_log
