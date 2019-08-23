@@ -159,8 +159,7 @@ function install_archive_scripts () {
     fi
 
     log_progress "Installing archive module scripts"
-    get_script /tmp verify-archive-configuration.sh $archive_module
-    get_script /tmp configure-archive.sh $archive_module
+    get_script /tmp verify-and-configure-archive.sh $archive_module
     get_script $install_path archive-clips.sh $archive_module
     get_script $install_path connect-archive.sh $archive_module
     get_script $install_path disconnect-archive.sh $archive_module
@@ -170,6 +169,13 @@ function install_archive_scripts () {
     then
       get_script $install_path copy-music.sh $archive_module
     fi
+}
+
+
+function install_python_packages () {
+  setup_progress "Installing python packages..."
+  apt-get --assume-yes install python3-pip
+  pip3 install boto3
 }
 
 function check_pushover_configuration () {
@@ -226,6 +232,25 @@ function check_ifttt_configuration () {
     fi
 }
 
+function check_sns_configuration () {
+    if [ ! -z "${sns_enabled+x}" ]
+    then
+        if [ ! -n "${aws_access_key_id+x}" ] || [ ! -n "${aws_secret_key+x}" || [ ! -n "${aws_sns_topic_arn+x}"  ]
+        then
+            echo "STOP: You're trying to setup AWS SNS but didn't provide your User and/or App key and/or topic ARN."
+            echo "Define the variables like this:"
+            echo "export aws_access_key_id=put_your_accesskeyid_here"
+            echo "export aws_secret_key=put_your_secretkey_here"
+            echo "export aws_sns_topic_arn=put_your_sns_topicarn_here"
+            exit 1
+        elif [ "${aws_access_key_id}" = "put_your_accesskeyid_here" ] || [  "${aws_secret_key}" = "put_your_secretkey_here"  || [  "${aws_sns_topic_arn}" = "put_your_sns_topicarn_here" ]
+        then
+            echo "STOP: You're trying to setup SNS, but didn't replace the default values."
+            exit 1
+        fi
+    fi
+}
+
 function configure_pushover () {
     if [ ! -z "${pushover_enabled+x}" ]
     then
@@ -263,6 +288,28 @@ function configure_ifttt () {
     fi
 }
 
+function configure_sns () {
+    if [ ! -z "${sns_enabled+x}" ]
+    then
+        echo "Enabling SNS"
+        mkdir /root/.aws
+
+        echo "[default]" > /root/.aws/credentials
+        echo "aws_access_key_id = $aws_access_key_id" >> /root/.aws/credentials
+        echo "aws_secret_access_key = $aws_secret_key" >> /root/.aws/credentials
+
+        echo "[default]" > /root/.aws/config
+        echo "region = $aws_region" >> /root/.aws/config
+
+        echo "export sns_enabled=true" > /root/.teslaCamSNSTopicARN
+        echo "export sns_topic_arn=$aws_sns_topic_arn" >> /root/.teslaCamSNSTopicARN
+
+        install_python_packages
+    else
+        echo "SNS not configured."
+    fi
+}
+
 function check_and_configure_pushover () {
     check_pushover_configuration
 
@@ -281,9 +328,17 @@ function check_and_configure_ifttt () {
     configure_ifttt
 }
 
+
+function check_and_configure_sns () {
+    check_sns_configuration
+
+    configure_sns
+}
+
 function install_push_message_scripts() {
     local install_path="$1"
     get_script $install_path send-push-message run
+    get_script $install_path send_sns.py run
 }
 
 if ! [ $(id -u) = 0 ]
@@ -309,6 +364,7 @@ else
     check_and_configure_pushover
     check_and_configure_gotify
     check_and_configure_ifttt
+    check_and_configure_sns
     install_push_message_scripts /root/bin
 
     check_archive_configs
@@ -320,8 +376,7 @@ else
     log_progress "Using archive module: $archive_module"
 
     install_archive_scripts /root/bin $archive_module
-    /tmp/verify-archive-configuration.sh
-    /tmp/configure-archive.sh
+    /tmp/verify-and-configure-archive.sh
 
     install_rc_local /root/bin
 fi

@@ -272,8 +272,24 @@ function archive_teslacam_clips () {
 
   fix_errors_in_cam_file
 
+  if [ -f /root/bin/tesla_api.py ]
+  then
+    while :
+    do
+      sleep 120
+      /root/bin/tesla_api.py wake_up_vehicle >> "$LOG_FILE"
+    done&
+    WAKE_PID=$!
+    log "wake up car process is $WAKE_PID"
+  fi
+
   /root/bin/archive-clips.sh
 
+  if [ ! -z "${WAKE_PID+x}" ]
+  then
+    log "killing PID $WAKE_PID"
+    kill $WAKE_PID
+  fi
   unmount_cam_file
 }
 
@@ -356,7 +372,7 @@ function doubleblink () {
 }
 
 function set_time () {
-  log "Waiting for time to be set by ntpd"
+  log "Waiting for time to be set by ntpd..."
   for i in $(seq 1 10)
   do
     if ntp-wait --tries=1 --sleep=1
