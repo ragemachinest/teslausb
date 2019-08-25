@@ -33,7 +33,7 @@ function make_links_for_snapshot {
     for f in $curmnt/TeslaCam/RecentClips/*
     do
       log "linking $f"
-      ln -sf $(echo $f | sed "s@$curmnt@$finalmnt@") $collection
+      ln -sf "$(echo $f | sed "s@$curmnt@$finalmnt@")" $collection
     done
   fi
   # also link in any files that were moved to SavedClips
@@ -93,15 +93,15 @@ function snapshot {
   log "took snapshot" 
  
   # check whether this snapshot is actually different from the previous one 
-  ls -lR --time-style=+%s "$tmpsnapmnt/TeslaCam" > "$tmpsnapname.toc" 
-  if cmp "$oldname.toc" "$tmpsnapname.toc" 
-  then 
+  find "$tmpsnapmnt/TeslaCam" -type f -printf '%s %P\n' > "$tmpsnapname.toc"
+  if diff "$oldname.toc" "$tmpsnapname.toc" | grep -e '^>'
+  then
+    make_links_for_snapshot "$tmpsnapmnt" "$newsnapdir/mnt"
+    mv "$tmpsnapdir" "$newsnapdir"
+  else
     log "new snapshot is identical to previous one, discarding" 
     /root/bin/release_snapshot.sh "$tmpsnapmnt" 
     rm -rf "$tmpsnapdir" 
-  else 
-    make_links_for_snapshot "$tmpsnapmnt" "$newsnapdir/mnt" 
-    mv "$tmpsnapdir" "$newsnapdir" 
   fi 
 }
 
