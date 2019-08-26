@@ -65,8 +65,8 @@ function snapshot {
     fi
     if ! stat /backingfiles/snapshots/snap-*/snap.bin > /dev/null 2>&1
     then
-      log "not enough space for snapshots"
-      return
+      log "warning: low space for snapshots"
+      break
     fi
     oldest=$(ls -ldC1 /backingfiles/snapshots/snap-* | head -1)
     log "low space, deleting $oldest"
@@ -94,7 +94,8 @@ function snapshot {
 
   # check whether this snapshot is actually different from the previous one
   find "$tmpsnapmnt/TeslaCam" -type f -printf '%s %P\n' > "$tmpsnapname.toc"
-  if diff "$oldname.toc" "$tmpsnapname.toc" | grep -e '^>'
+  log "comparing $oldname.toc and $tmpsnapname.toc"
+  if [[ ! -e "$oldname.toc" ]] || diff "$oldname.toc" "$tmpsnapname.toc" | grep -e '^>'
   then
     make_links_for_snapshot "$tmpsnapmnt" "$newsnapdir/mnt"
     mv "$tmpsnapdir" "$newsnapdir"
