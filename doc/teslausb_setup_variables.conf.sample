@@ -17,6 +17,11 @@ export sharename=your_archive_share_name
 export shareuser=username
 export sharepassword=password
 # export cifs_version="3.0"
+
+# Uncomment the follwing line and select drive if you want to use an external drive instead of built-in MicroSD card. 
+# External USB drive is supported only for RPi4. 
+# export usb_drive=/dev/sda
+
 export camsize=100%
 
 # if you set camsize to less than 100%, but don't want music to use
@@ -42,6 +47,9 @@ export HEADLESS_SETUP=true
 #export SAMBA_ENABLED=true
 # uncomment to enable guest access to the samba server
 #export SAMBA_GUEST=true
+
+# uncomment to disable snapshots. This also disables samba and RecentClips-extension
+#export SNAPSHOTS_ENABLED=false
 
 # uncomment to enable teslausb to act as a wifi access point with the given
 # SSID, so you can access it while on the road.

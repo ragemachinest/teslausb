@@ -46,12 +46,14 @@ REPO=${REPO:-marcone}
 BRANCH=${BRANCH:-main-dev}
 USE_LED_FOR_SETUP_PROGRESS=true
 CONFIGURE_ARCHIVING=${CONFIGURE_ARCHIVING:-true}
-UPGRADE_PACKAGES=${UPGRADE_PACKAGES:-true}
+UPGRADE_PACKAGES=${UPGRADE_PACKAGES:-false}
 TESLAUSB_HOSTNAME=${TESLAUSB_HOSTNAME:-teslausb}
 SAMBA_ENABLED=${SAMBA_ENABLED:-false}
 SAMBA_GUEST=${SAMBA_GUEST:-false}
+SNAPSHOTS_ENABLED=${SNAPSHOTS_ENABLED:-true}
 export camsize=${camsize:-90%}
 export musicsize=${musicsize:-100%}
+export usb_drive=${usb_drive:-''}
 
 function setup_progress () {
   local setup_logfile=/boot/teslausb-headless-setup.log
@@ -165,6 +167,7 @@ function get_common_scripts () {
   get_script /root/bin mount_snapshot.sh run
   get_script /root/bin mount_image.sh run
   get_script /root/bin release_snapshot.sh run
+  get_script /root/bin force_sync.sh run
 }
 
 function fix_cmdline_txt_modules_load ()
@@ -231,7 +234,11 @@ function make_root_fs_readonly () {
 
 function update_package_index () {
   setup_progress "Updating package index files..."
-  apt-get update
+  while ! apt-get update
+  do
+    setup_progress "Failed, retrying"
+    sleep 2
+  done
 }
 
 function upgrade_packages () {
@@ -286,6 +293,8 @@ function cmd_selfupdate {
 function cmd_diagnose {
   {
     echo -e "====== summary ======"
+    echo -e "hardware: $(cat /sys/firmware/devicetree/base/model | tr -d '\000')"
+    echo -e "OS: $(. /etc/os-release && echo $PRETTY_NAME)"
     if [ -e /root/teslausb_setup_variables.conf ]
     then
       echo "headless setup config in /root"
@@ -330,8 +339,8 @@ function cmd_diagnose {
     then
       echo "cam disk image not in fstab"
     fi
-    LUN0=/sys/devices/platform/soc/20980000.usb/gadget/lun0/file
-    LUN1=/sys/devices/platform/soc/20980000.usb/gadget/lun1/file
+    LUN0=/sys/devices/platform/soc/??980000.usb/gadget/lun0/file
+    LUN1=/sys/devices/platform/soc/??980000.usb/gadget/lun1/file
     if [ -e $LUN0 ]
     then
       echo "lun0 connected, from file $(cat $LUN0)"
@@ -360,9 +369,14 @@ function cmd_diagnose {
 
     echo -e "====== disk ======"
     parted /dev/mmcblk0 print
+    if [ ! -z "$usb_drive" ]
+    then
+      parted $usb_drive print
+    fi
 
     echo -e "====== network ======"
     ifconfig
+    iwconfig wlan0 | grep Link
 
     echo -e "====== fstab ======"
     if [ -e /etc/fstab ]
@@ -375,7 +389,12 @@ function cmd_diagnose {
     echo -e "====== initial setup boot log ======"
     mkdir /tmp/root$$
     mount --bind / /tmp/root$$
-    cat /tmp/root$$/var/log/boot.log
+    if [ -e /tmp/root$$/var/log/boot.log ]
+    then
+      cat /tmp/root$$/var/log/boot.log
+    else
+      echo "no boot log found"
+    fi
     umount /tmp/root$$
     rmdir /tmp/root$$
 
@@ -443,6 +462,12 @@ then
   fi
 fi
 
+# Update /boot/config.txt if needed
+if ! grep -q 'dtoverlay=dwc2' /boot/config.txt
+then
+  echo -e "dtoverlay=dwc2\n" >> /boot/config.txt
+fi
+
 configure_hostname
 
 HEAD_VERSION=$(curlwrapper -s "https://api.github.com/repos/$REPO/teslausb/git/refs/heads/$BRANCH" | grep '"sha":' | awk '{print $2}' | sed 's/"\|,//g')
@@ -505,11 +530,16 @@ else
   setup_progress "skipping configure.sh"
 fi
 
-if [ "$SAMBA_ENABLED" = "true" ]
+if [ "$SAMBA_ENABLED" = "true" ] 
 then
-  export SAMBA_GUEST
-  get_script /tmp configure-samba.sh setup/pi
-  /tmp/configure-samba.sh
+  if [ "$SNAPSHOTS_ENABLED" = "true" ]
+  then
+    export SAMBA_GUEST
+    get_script /tmp configure-samba.sh setup/pi
+    /tmp/configure-samba.sh
+  else
+    setup_progress "snapshots disabled, skipping Samba configuration"
+  fi
 fi
 
 if [ ! -z ${AP_SSID:+x} ]
@@ -526,3 +556,8 @@ upgrade_packages
 setup_led_on
 
 setup_progress "All done."
+
+if [ -t 0 ]
+then
+  setup_progress '(reboot now for changes to take effect)'
+fi
